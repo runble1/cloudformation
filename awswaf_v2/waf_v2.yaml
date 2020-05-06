@@ -1,10 +1,133 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: Create WebACL example
+Parameters:
+  WebACLName:
+    Description: The Name of WebACL.
+    Type: String
+    Default: ExampleWebACL
+  BucketName:
+    Type: String
+    Description: The name for the bucket.
+    Default: waf-logs
 Resources:
-  ExampleWebACL:
+  S3BacketForWAF:
+    Type: "AWS::S3::Bucket"
+    Properties: 
+      BucketName: !Sub ${BucketName}-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256 
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  FirehoseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: '/'
+      AssumeRolePolicyDocument: #Kinesis Firehose に IAM を割り当てるため
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - firehose.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Sub ${AWS::AccountId}
+      Policies:
+        - 
+         PolicyName: firehose_delivery_role
+         PolicyDocument:
+           Version: "2012-10-17"
+           Statement:
+              #- 
+              #  Effect: "Allow"
+              #  Action: 
+              #    - glue:GetTable
+              #    - glue:GetTableVersion
+              #    - glue:GetTableVersions
+              #  Resource: "*"
+              -
+                Effect: "Allow"
+                Action: 
+                  - s3:AbortMultipartUpload
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:PutObject
+                Resource:
+                  - !Sub arn:aws:s3:::${BucketName}-${AWS::AccountId}
+                  - !Sub arn:aws:s3:::${BucketName}-${AWS::AccountId}/*
+                  - arn:aws:s3:::%FIREHOSE_BUCKET_NAME%
+                  - arn:aws:s3:::%FIREHOSE_BUCKET_NAME%/*
+              -
+                Effect: "Allow"
+                Action: 
+                  - kinesis:DescribeStream
+                  - kinesis:GetShardIterator
+                  - kinesis:GetRecords
+                Resource:
+                  - !Sub arn:aws:kinesis:${AWS::Region}:${AWS::AccountId}:stream/%FIREHOSE_STREAM_NAME%
+              -
+                Effect: "Allow"
+                Action: 
+                  - kms:GenerateDataKey
+                  - kms:Decrypt
+                Resource:
+                  - !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/s3
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+                  StringLike:
+                    kms:EncryptionContext:aws:s3:arn:
+                      - !Sub arn:aws:s3:::${BucketName}-${AWS::AccountId}/*
+                      - !Sub arn:aws:s3:::${BucketName}-${AWS::AccountId}/%FIREHOSE_BUCKET_PREFIX%*
+              -
+                Effect: "Allow"
+                Action: 
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesisfirehose/aws-waf-logs-${AWS::Region}-${WebACLName}:log-stream:*
+              -
+                Effect: "Allow"
+                Action: 
+                  - lambda:InvokeFunction
+                  - lambda:GetFunctionConfiguration
+                Resource:
+                  - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:%FIREHOSE_DEFAULT_FUNCTION%:%FIREHOSE_DEFAULT_VERSION%
+              -
+                Effect: "Allow"
+                Action: 
+                  - kms:Decrypt
+                Resource:
+                  - !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/%SSE_KEY_ID%
+                Condition:
+                  StringEquals:
+                    kms:ViaService: kinesis.%REGION_NAME%.amazonaws.com
+                  StringLike:
+                    kms:EncryptionContext:aws:kinesis:arn: !Sub arn:aws:kinesis:%REGION_NAME%:${AWS::AccountId}:stream/%FIREHOSE_STREAM_NAME%
+  FirehoseDeliveryStream:
+    Type: "AWS::KinesisFirehose::DeliveryStream"
+    Properties:
+      DeliveryStreamName: !Sub aws-waf-logs-${BucketName}-${AWS::Region}-${WebACLName}
+      DeliveryStreamType: DirectPut
+      S3DestinationConfiguration:
+        BucketARN: !GetAtt S3BacketForWAF.Arn
+        BufferingHints:
+          IntervalInSeconds: 300
+          SizeInMBs: 5
+        CompressionFormat: GZIP
+        RoleARN: !GetAtt FirehoseRole.Arn
+  WebACL:
     Type: AWS::WAFv2::WebACL
     Properties:
-      Name: ExampleWebACL
+      Name: !Sub ${WebACLName}
       Scope: REGIONAL
       Description: This is an example WebACL
       DefaultAction:
@@ -12,7 +135,7 @@ Resources:
       VisibilityConfig:
         SampledRequestsEnabled: true
         CloudWatchMetricsEnabled: true
-        MetricName: ExampleWebACLMetric
+        MetricName: !Sub ${WebACLName}
       Rules:
         - Name: AWSManagedRulesCommonRuleSet
           Priority: 0
