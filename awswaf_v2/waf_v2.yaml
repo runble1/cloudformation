@@ -139,7 +139,7 @@ Resources:
       Scope: REGIONAL
       Description: This is an example WebACL
       DefaultAction:
-        Allow: {}
+        Block: {} # Allow or Block or Count
       VisibilityConfig:
         SampledRequestsEnabled: true
         CloudWatchMetricsEnabled: true
@@ -148,7 +148,7 @@ Resources:
         - Name: AWSManagedRulesCommonRuleSet
           Priority: 0
           OverrideAction:
-            Count: {}
+            None: {} # None or Count
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
@@ -161,7 +161,7 @@ Resources:
         - Name: AWSManagedRulesKnownBadInputsRuleSet
           Priority: 1
           OverrideAction:
-            Count: {}
+            None: {}
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
@@ -174,7 +174,7 @@ Resources:
         - Name: AWSManagedRulesAmazonIpReputationList
           Priority: 2
           OverrideAction:
-            Count: {}
+            None: {}
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
@@ -187,7 +187,7 @@ Resources:
         - Name: AWSManagedRulesAnonymousIpList
           Priority: 3
           OverrideAction:
-            Count: {}
+            None: {}
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
@@ -200,7 +200,7 @@ Resources:
         - Name: AWSManagedRulesSQLiRuleSet
           Priority: 4
           OverrideAction:
-            Count: {}
+            None: {}
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
@@ -213,7 +213,7 @@ Resources:
         - Name: AWSManagedRulesLinuxRuleSet
           Priority: 5
           OverrideAction:
-            Count: {}
+            None: {}
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
@@ -226,7 +226,7 @@ Resources:
         - Name: AWSManagedRulesUnixRuleSet
           Priority: 6
           OverrideAction:
-            Count: {}
+            None: {}
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
