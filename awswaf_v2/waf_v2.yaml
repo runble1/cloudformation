@@ -236,3 +236,8 @@ Resources:
               VendorName: AWS
               Name: AWSManagedRulesUnixRuleSet
               ExcludedRules: []
+  WebACLAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties: 
+      ResourceArn: "arn:aws:elasticloadbalancing:ap-northeast-1:657885203613:loadbalancer/app/webserver-alb/3c8d60490de0199e"
+      WebACLArn: !GetAtt WebACL.Arn
