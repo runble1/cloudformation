@@ -45,6 +45,13 @@ Resources:
          PolicyDocument:
            Version: "2012-10-17"
            Statement:
+              - 
+                Effect: "Allow"
+                Action: 
+                  - glue:GetTable
+                  - glue:GetTableVersion
+                  - glue:GetTableVersions
+                Resource: "*"
               -
                 Effect: "Allow"
                 Action: 
@@ -105,6 +112,14 @@ Resources:
                     kms:ViaService: kinesis.%REGION_NAME%.amazonaws.com
                   StringLike:
                     kms:EncryptionContext:aws:kinesis:arn: !Sub arn:aws:kinesis:%REGION_NAME%:${AWS::AccountId}:stream/%FIREHOSE_STREAM_NAME%
+              -
+                Effect: "Allow"
+                Action: 
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource:
+                  - arn:aws:s3:::waf-test-cross-account/*
   FirehoseDeliveryStream:
     Type: "AWS::KinesisFirehose::DeliveryStream"
     Properties:
