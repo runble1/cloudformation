@@ -9,6 +9,7 @@ Parameters:
     Type: String
     Description: The name for the bucket.
     Default: waf-test-cross-account
+
 Resources:
   GlueDatabase:
     Type: AWS::Glue::Database
@@ -22,30 +23,37 @@ Resources:
       CatalogId: !Ref AWS::AccountId
       DatabaseName: !Ref GlueDatabase
       TableInput:
+        Name: glue-table-waflog
         Owner: owner
         Retention: 0
         StorageDescriptor:
           Columns:
-          - Name: pickup_latitude
-            Type: double
-          - Name: pickup_longitude
-            Type: double
-          - Name: dropoff_latitude
-            Type: double
-          - Name: dropoff_longitude
-            Type: double
-          - Name: trip_id
+          - Name: timestamp
+            Type: bigint
+          - Name: formatversion
             Type: int
-          - Name: trip_distance
-            Type: double
-          - Name: passenger_count
-            Type: int
-          - Name: pickup_datetime
-            Type: timestamp
-          - Name: dropoff_datetime
-            Type: timestamp
-          - Name: total_amount
-            Type: double
+          - Name: webaclid
+            Type: string
+          - Name: terminatingruleid
+            Type: string
+          - Name: terminatingruletype
+            Type: string
+          - Name: action
+            Type: string
+          - Name: terminatingrulematchdetails
+            Type: array
+          - Name: httpsourcename
+            Type: string
+          - Name: httpsourceid
+            Type: string
+          - Name: rulegrouplist
+            Type: array
+          - Name: ratebasedrulelist
+            Type: array
+          - Name: nonterminatingmatchingrules
+            Type: array
+          - Name: httprequest
+            Type: struct
           InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
           OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
           Compressed: false
@@ -164,6 +172,7 @@ Resources:
       DeliveryStreamName: !Sub aws-waf-logs-${BucketName}-${AWS::Region}-${WebACLName}
       DeliveryStreamType: DirectPut
       ExtendedS3DestinationConfiguration:
+        RoleARN: !GetAtt FirehoseRole.Arn
         BucketARN: !Sub arn:aws:s3:::${BucketName}
         Prefix: !Join 
           - ''
@@ -177,7 +186,8 @@ Resources:
           SizeInMBs: 128
           IntervalInSeconds: 300
         CompressionFormat: UNCOMPRESSED
-        RoleARN: !GetAtt FirehoseRole.Arn
+        EncryptionConfiguration:
+          NoEncryptionConfig: NoEncryption
         CloudWatchLoggingOptions:
           Enabled: true
           LogGroupName: !Sub '/aws/kinesisfirehose/aws-waf-logs-${AWS::StackName}'
