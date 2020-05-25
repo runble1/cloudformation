@@ -8,74 +8,10 @@ Parameters:
   BucketName:
     Type: String
     Description: The name for the bucket.
-    Default: waf-test-cross-account
+    Default: waf-logs-no-parquet
 
 Resources:
-  GlueDatabase:
-    Type: AWS::Glue::Database
-    Properties: 
-      CatalogId: !Ref AWS::AccountId
-      DatabaseInput: {}
-
-  GlueTable:
-    Type: AWS::Glue::Table
-    Properties:
-      CatalogId: !Ref AWS::AccountId
-      DatabaseName: !Ref GlueDatabase
-      TableInput:
-        Name: glue-table-waflog
-        Owner: owner
-        Retention: 0
-        StorageDescriptor:
-          Columns:
-          - Name: timestamp
-            Type: bigint
-          - Name: formatversion
-            Type: int
-          - Name: webaclid
-            Type: string
-          - Name: terminatingruleid
-            Type: string
-          - Name: terminatingruletype
-            Type: string
-          - Name: action
-            Type: string
-          - Name: terminatingrulematchdetails
-            Type: array
-          - Name: httpsourcename
-            Type: string
-          - Name: httpsourceid
-            Type: string
-          - Name: rulegrouplist
-            Type: array
-          - Name: ratebasedrulelist
-            Type: array
-          - Name: nonterminatingmatchingrules
-            Type: array
-          - Name: httprequest
-            Type: struct
-          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
-          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
-          Compressed: false
-          NumberOfBuckets: -1
-          SerdeInfo:
-            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
-            Parameters:
-              serialization.format: '1'
-          BucketColumns: []
-          SortColumns: []
-          StoredAsSubDirectories: false
-        PartitionKeys:
-        - Name: year
-          Type: string
-        - Name: month
-          Type: string
-        - Name: day
-          Type: string
-        - Name: hour
-          Type: string
-        TableType: EXTERNAL_TABLE
-
+  
   FirehoseRole:
     Type: AWS::IAM::Role
     #RoleName: FirehoseToAnotherS3
@@ -169,44 +105,23 @@ Resources:
   FirehoseDeliveryStream:
     Type: "AWS::KinesisFirehose::DeliveryStream"
     Properties:
-      DeliveryStreamName: !Sub aws-waf-logs-${BucketName}-${AWS::Region}-${WebACLName}
+      DeliveryStreamName: !Sub aws-waf-logs-no-parquet
       DeliveryStreamType: DirectPut
       ExtendedS3DestinationConfiguration:
         RoleARN: !GetAtt FirehoseRole.Arn
         BucketARN: !Sub arn:aws:s3:::${BucketName}
-        Prefix: !Join 
-          - ''
-          - - !Ref GlueTable
-            -  '/year=!{timestamp:YYYY}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/'
-        ErrorOutputPrefix: !Join 
-          - ''
-          - - !Ref GlueTable
-            -  'error/!{firehose:error-output-type}/year=!{timestamp:YYYY}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/'
+        Prefix: 'WAFLOG/year=!{timestamp:YYYY}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/'
+        ErrorOutputPrefix: 'ERRORLOG/!{firehose:error-output-type}/year=!{timestamp:YYYY}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/'
         BufferingHints:
-          SizeInMBs: 128
+          SizeInMBs: 5
           IntervalInSeconds: 300
-        CompressionFormat: UNCOMPRESSED
+        CompressionFormat: GZIP
         EncryptionConfiguration:
           NoEncryptionConfig: NoEncryption
         CloudWatchLoggingOptions:
           Enabled: true
           LogGroupName: !Sub '/aws/kinesisfirehose/aws-waf-logs-${AWS::StackName}'
           LogStreamName: S3Delivery
-        DataFormatConversionConfiguration:
-          SchemaConfiguration:
-            CatalogId: !Ref AWS::AccountId
-            RoleARN: !GetAtt FirehoseRole.Arn
-            DatabaseName: !Ref GlueDatabase
-            TableName: !Ref GlueTable
-            Region: !Ref AWS::Region
-            VersionId: LATEST
-          InputFormatConfiguration:
-            Deserializer:
-              OpenXJsonSerDe: {}
-          OutputFormatConfiguration:
-            Serializer:
-              ParquetSerDe: {}
-          Enabled: True
         
   WAFLogDeliveryStreamLogGroup:
     Type: AWS::Logs::LogGroup
@@ -226,16 +141,16 @@ Resources:
       Scope: REGIONAL
       Description: This is an example WebACL
       DefaultAction:
-        Allow: {} # Allow or Block or Count
+        Allow: {} # Allow or Block
       VisibilityConfig:
-        SampledRequestsEnabled: true
+        SampledRequestsEnabled: false
         CloudWatchMetricsEnabled: true
         MetricName: !Sub ${WebACLName}
       Rules:
         - Name: AWSManagedRulesCommonRuleSet
           Priority: 0
           OverrideAction:
-            Count: {} # None or Count
+            None: {} # None or Count
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
