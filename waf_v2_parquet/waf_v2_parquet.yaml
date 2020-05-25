@@ -1,0 +1,226 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Create WAF v2 AND Kinesis Firehose
+Parameters:
+  WebACLName:
+    Description: The Name of WebACL.
+    Type: String
+    Default: ExampleWebACL
+  BucketName:
+    Type: String
+    Description: The name for the bucket.
+    Default: waf-logs-parquet-test
+
+Resources:
+
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties: 
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput: {}
+
+  GlueTable:
+    Type: AWS::Glue::Table
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseName: !Ref GlueDatabase
+      TableInput:
+        Name: glue-table-waflog
+        Owner: owner
+        Retention: 0
+        StorageDescriptor:
+          Columns:
+          - Name: timestamp
+            Type: bigint
+          - Name: formatversion
+            Type: int
+          - Name: webaclid
+            Type: string
+          - Name: terminatingruleid
+            Type: string
+          - Name: terminatingruletype
+            Type: string
+          - Name: action
+            Type: string
+          - Name: terminatingrulematchdetails
+            Type: array<string>
+          - Name: httpsourcename
+            Type: string
+          - Name: httpsourceid
+            Type: string
+          - Name: rulegrouplist
+            Type: array<struct<ruleGroupId:string,terminatingRule:struct<ruleId:string,action:string>,nonTerminatingMatchingRules:array<string>,excludedRules:string>>
+          - Name: ratebasedrulelist
+            Type: array<string>
+          - Name: nonterminatingmatchingrules
+            Type: array<string>
+          - Name: httprequest
+            Type: struct<clientIp:string,country:string,headers:array<struct<name:string,value:string>>,uri:string,args:string,httpVersion:string,httpMethod:string,requestId:string>
+          InputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat
+          Compressed: false
+          NumberOfBuckets: -1
+          SerdeInfo:
+            SerializationLibrary: org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe
+            Parameters:
+              serialization.format: '1'
+          BucketColumns: []
+          SortColumns: []
+          StoredAsSubDirectories: false
+        PartitionKeys:
+        - Name: year
+          Type: string
+        - Name: month
+          Type: string
+        - Name: day
+          Type: string
+        - Name: hour
+          Type: string
+        TableType: EXTERNAL_TABLE
+  
+  FirehoseRole:
+    Type: AWS::IAM::Role
+    #RoleName: FirehoseToAnotherS3
+    Properties:
+      Path: '/'
+      AssumeRolePolicyDocument: # Kinesis FirehoseにIAM Roleを割り当てるため
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - firehose.amazonaws.com
+            Action:
+              - sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Sub ${AWS::AccountId}
+      Policies:
+        - 
+         PolicyName: firehose_delivery_role
+         PolicyDocument:
+           Version: "2012-10-17"
+           Statement:
+              - 
+                Effect: Allow
+                Action:
+                  - glue:GetTable
+                  - glue:GetTableVersion
+                  - glue:GetTableVersions
+                Resource: "*"
+              -
+                Effect: "Allow"
+                Action: 
+                  - s3:AbortMultipartUpload
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:PutObject
+                Resource:
+                  - !Sub arn:aws:s3:::${BucketName}
+                  - !Sub arn:aws:s3:::${BucketName}/*
+              -
+                Effect: "Allow"
+                Action: 
+                  - kinesis:DescribeStream
+                  - kinesis:GetShardIterator
+                  - kinesis:GetRecords
+                  - kinesis:ListShards
+                Resource:
+                  - !Sub arn:aws:kinesis:${AWS::Region}:${AWS::AccountId}:stream/%FIREHOSE_STREAM_NAME%
+              -
+                Effect: "Allow"
+                Action: 
+                  - kms:GenerateDataKey
+                  - kms:Decrypt
+                Resource:
+                  - !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/s3
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+                  StringLike:
+                    kms:EncryptionContext:aws:s3:arn:
+                      - !Sub arn:aws:s3:::${BucketName}/*
+                      - !Sub arn:aws:s3:::${BucketName}/%FIREHOSE_BUCKET_PREFIX%*
+              -
+                Effect: "Allow"
+                Action: 
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesisfirehose/aws-waf-logs-${AWS::Region}-${WebACLName}:log-stream:*
+              -
+                Effect: "Allow"
+                Action: 
+                  - lambda:InvokeFunction
+                  - lambda:GetFunctionConfiguration
+                Resource:
+                  - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:%FIREHOSE_DEFAULT_FUNCTION%:%FIREHOSE_DEFAULT_VERSION%
+              -
+                Effect: "Allow"
+                Action: 
+                  - kms:Decrypt
+                Resource:
+                  - !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/%SSE_KEY_ID%
+                Condition:
+                  StringEquals:
+                    kms:ViaService: kinesis.%REGION_NAME%.amazonaws.com
+                  StringLike:
+                    kms:EncryptionContext:aws:kinesis:arn: !Sub arn:aws:kinesis:%REGION_NAME%:${AWS::AccountId}:stream/%FIREHOSE_STREAM_NAME%
+
+  FirehoseDeliveryStream:
+    Type: "AWS::KinesisFirehose::DeliveryStream"
+    Properties:
+      DeliveryStreamName: !Sub aws-waf-logs-parquet
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        RoleARN: !GetAtt FirehoseRole.Arn
+        BucketARN: !Sub arn:aws:s3:::${BucketName}
+        Prefix: !Join 
+          - ''
+          - - "WAFLOG"
+            -  '/year=!{timestamp:YYYY}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/'
+        ErrorOutputPrefix: !Join 
+          - ''
+          - - "ERRORLOG"
+            -  '/!{firehose:error-output-type}/year=!{timestamp:YYYY}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/'
+        BufferingHints:
+          SizeInMBs: 128
+          IntervalInSeconds: 300
+        CompressionFormat: UNCOMPRESSED
+        EncryptionConfiguration:
+          NoEncryptionConfig: NoEncryption
+        CloudWatchLoggingOptions:
+          Enabled: true
+          LogGroupName: !Sub '/aws/kinesisfirehose/aws-waf-logs-${AWS::StackName}'
+          LogStreamName: S3Delivery
+        DataFormatConversionConfiguration:
+          SchemaConfiguration:
+            CatalogId: !Ref AWS::AccountId
+            RoleARN: !GetAtt FirehoseRole.Arn
+            DatabaseName: !Ref GlueDatabase
+            TableName: glue-table-waflog #!Ref GlueTable
+            Region: !Ref AWS::Region
+            VersionId: LATEST
+          InputFormatConfiguration:
+            Deserializer:
+              OpenXJsonSerDe: {}
+          OutputFormatConfiguration:
+            Serializer:
+              ParquetSerDe: {}
+          Enabled: True
+        
+  WAFLogDeliveryStreamLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      LogGroupName: !Sub '/aws/kinesisfirehose/aws-waf-logs-${AWS::StackName}'
+
+  WAFLogDeliveryStreamLogStream:
+    Type: AWS::Logs::LogStream
+    Properties: 
+      LogGroupName: !Ref WAFLogDeliveryStreamLogGroup
+      LogStreamName: S3Delivery
+
+Outputs:
+  deliverysreamARN:
+    Description: The ARN of the firehose delivery stream
+    Value: !GetAtt FirehoseDeliveryStream.Arn
